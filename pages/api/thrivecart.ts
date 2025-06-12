@@ -71,13 +71,7 @@ export default async function handler(
 
     try {
       // Fetch orders data from ThriveCart
-      const ordersData = await makeThriveCartRequest('/orders', {
-        method: 'GET',
-        params: {
-          start_date: fromDateStr,
-          end_date: toDateStr
-        }
-      })
+      const ordersData = await makeThriveCartRequest(`/orders?start_date=${fromDateStr}&end_date=${toDateStr}`)
 
       // Process orders data
       const orders = ordersData.orders || []
