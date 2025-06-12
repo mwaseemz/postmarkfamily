@@ -103,37 +103,42 @@ export default async function handler(
       // Fetch data from multiple Postmark endpoints for comprehensive stats
       const baseParams = `?fromdate=${fromDateStr}&todate=${toDateStr}`
       
-      const [
-        sentStats,
-        bounceStats,
-        spamStats,
-        openStats,
-        clickStats,
-        suppressions
-      ] = await Promise.all([
-        makePostmarkRequest(`/stats/outbound/sends${baseParams}`),
-        makePostmarkRequest(`/stats/outbound/bounces${baseParams}`),
-        makePostmarkRequest(`/stats/outbound/spam${baseParams}`),
-        makePostmarkRequest(`/stats/outbound/opens${baseParams}`),
-        makePostmarkRequest(`/stats/outbound/clicks${baseParams}`),
-        makePostmarkRequest('/suppressions/dump')
-      ])
+      // Fetch data from multiple Postmark endpoints, with fallbacks for failed requests
+      let sentData, bounceData, spamData, openData, clickData
 
-      console.log('API responses received:', {
-        sent: sentStats,
-        bounces: bounceStats,
-        spam: spamStats,
-        opens: openStats,
-        clicks: clickStats,
-        suppressions: suppressions?.suppressions?.length || 0
+      try {
+        [sentData, bounceData, spamData, openData, clickData] = await Promise.all([
+          makePostmarkRequest(`/stats/outbound/sends${baseParams}`),
+          makePostmarkRequest(`/stats/outbound/bounces${baseParams}`),
+          makePostmarkRequest(`/stats/outbound/spam${baseParams}`),
+          makePostmarkRequest(`/stats/outbound/opens${baseParams}`),
+          makePostmarkRequest(`/stats/outbound/clicks${baseParams}`)
+        ])
+      } catch (error) {
+        // If any request fails, try individual requests with fallbacks
+        console.log('Some Postmark endpoints failed, trying individually...')
+        
+        sentData = await makePostmarkRequest(`/stats/outbound/sends${baseParams}`).catch(() => ({ Days: [], Sent: 0 }))
+        bounceData = await makePostmarkRequest(`/stats/outbound/bounces${baseParams}`).catch(() => ({ Days: [], HardBounce: 0, SoftBounce: 0, Transient: 0, SMTPApiError: 0 }))
+        spamData = await makePostmarkRequest(`/stats/outbound/spam${baseParams}`).catch(() => ({ Days: [], SpamComplaint: 0 }))
+        openData = await makePostmarkRequest(`/stats/outbound/opens${baseParams}`).catch(() => ({ Days: [], Opens: 0 }))
+        clickData = await makePostmarkRequest(`/stats/outbound/clicks${baseParams}`).catch(() => ({ Days: [], Clicks: 0 }))
+      }
+
+      console.log('API responses processed:', {
+        sent: sentData,
+        bounces: bounceData,
+        spam: spamData,
+        opens: openData,
+        clicks: clickData
       })
 
       // Process daily data by combining all sources
       const dailyMap = new Map<string, any>()
       
       // Initialize daily data from sent stats
-      if (sentStats.Days) {
-        sentStats.Days.forEach((day: any) => {
+      if (sentData.Days) {
+        sentData.Days.forEach((day: any) => {
           dailyMap.set(day.Date, {
             date: day.Date,
             sent: day.Sent || 0,
@@ -142,14 +147,14 @@ export default async function handler(
             clicked: 0,
             bounced: 0,
             spam: 0,
-            unsubscribed: 0
+            unsubscribed: 0 // Will be calculated separately
           })
         })
       }
 
       // Add bounce data
-      if (bounceStats.Days) {
-        bounceStats.Days.forEach((day: any) => {
+      if (bounceData.Days) {
+        bounceData.Days.forEach((day: any) => {
           const existing = dailyMap.get(day.Date) || { 
             date: day.Date, sent: 0, delivered: 0, opened: 0, clicked: 0, bounced: 0, spam: 0, unsubscribed: 0 
           }
@@ -159,8 +164,8 @@ export default async function handler(
       }
 
       // Add spam data
-      if (spamStats.Days) {
-        spamStats.Days.forEach((day: any) => {
+      if (spamData.Days) {
+        spamData.Days.forEach((day: any) => {
           const existing = dailyMap.get(day.Date) || { 
             date: day.Date, sent: 0, delivered: 0, opened: 0, clicked: 0, bounced: 0, spam: 0, unsubscribed: 0 
           }
@@ -170,8 +175,8 @@ export default async function handler(
       }
 
       // Add open data
-      if (openStats.Days) {
-        openStats.Days.forEach((day: any) => {
+      if (openData.Days) {
+        openData.Days.forEach((day: any) => {
           const existing = dailyMap.get(day.Date) || { 
             date: day.Date, sent: 0, delivered: 0, opened: 0, clicked: 0, bounced: 0, spam: 0, unsubscribed: 0 
           }
@@ -181,33 +186,13 @@ export default async function handler(
       }
 
       // Add click data
-      if (clickStats.Days) {
-        clickStats.Days.forEach((day: any) => {
+      if (clickData.Days) {
+        clickData.Days.forEach((day: any) => {
           const existing = dailyMap.get(day.Date) || { 
             date: day.Date, sent: 0, delivered: 0, opened: 0, clicked: 0, bounced: 0, spam: 0, unsubscribed: 0 
           }
           existing.clicked = day.Clicks || 0
           dailyMap.set(day.Date, existing)
-        })
-      }
-
-      // Calculate delivered and process unsubscribes from suppressions
-      let totalUnsubscribed = 0
-      if (suppressions?.Suppressions) {
-        // Count suppressions with reason 'ManualSuppression' as unsubscribes
-        suppressions.Suppressions.forEach((suppression: any) => {
-          if (suppression.SuppressionReason === 'ManualSuppression') {
-            totalUnsubscribed++
-            // For daily breakdown, we'd need the created date of the suppression
-            // Postmark doesn't provide this in the dump, so we'll add to the latest day
-            const sortedDays = Array.from(dailyMap.keys()).sort()
-            if (sortedDays.length > 0) {
-              const latestDay = dailyMap.get(sortedDays[sortedDays.length - 1])
-              if (latestDay) {
-                latestDay.unsubscribed = Math.floor(totalUnsubscribed / sortedDays.length)
-              }
-            }
-          }
         })
       }
 
@@ -238,7 +223,7 @@ export default async function handler(
         clicked: 0,
         bounced: 0,
         spam: 0,
-        unsubscribed: totalUnsubscribed
+        unsubscribed: 0 // For now, unsubscribe data will show 0 as suppressions API requires special permissions
       })
 
       // Create summary
