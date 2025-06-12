@@ -1,9 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import { getPostmarkClient } from '@/lib/postmark'
 import { format, subDays } from 'date-fns'
-
-// Remove Prisma for Netlify compatibility - use direct API calls
-// const prisma = new PrismaClient()
 
 export interface StatsResponse {
   success: boolean
@@ -53,6 +49,27 @@ function calculateRate(numerator: number, denominator: number): number {
   return denominator > 0 ? Math.round((numerator / denominator) * 100 * 100) / 100 : 0
 }
 
+async function makePostmarkRequest(endpoint: string): Promise<any> {
+  const token = process.env.POSTMARK_SERVER_TOKEN
+  if (!token) {
+    throw new Error('POSTMARK_SERVER_TOKEN environment variable not set')
+  }
+
+  const response = await fetch(`https://api.postmarkapp.com${endpoint}`, {
+    headers: {
+      'Accept': 'application/json',
+      'X-Postmark-Server-Token': token
+    }
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(`Postmark API error: ${response.status} ${response.statusText} - ${errorText}`)
+  }
+
+  return response.json()
+}
+
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse<StatsResponse>
@@ -62,95 +79,189 @@ export default async function handler(
   }
 
   try {
-    const { from, to } = req.query
+    const { from, to, days } = req.query
     
-    // Default to last 30 days if no dates provided
-    const fromDate = from ? new Date(from as string) : subDays(new Date(), 30)
-    const toDate = to ? new Date(to as string) : new Date()
+    // Handle time framing - either from/to dates or days parameter
+    let fromDate: Date
+    let toDate: Date
+    
+    if (days) {
+      const daysNum = parseInt(days as string, 10)
+      toDate = new Date()
+      fromDate = subDays(toDate, daysNum)
+    } else {
+      fromDate = from ? new Date(from as string) : subDays(new Date(), 30)
+      toDate = to ? new Date(to as string) : new Date()
+    }
     
     const fromDateStr = format(fromDate, 'yyyy-MM-dd')
     const toDateStr = format(toDate, 'yyyy-MM-dd')
 
-    // Get fresh data from Postmark (no caching for serverless)
-    const postmark = getPostmarkClient()
-    
+    console.log(`Fetching Postmark data from ${fromDateStr} to ${toDateStr}`)
+
     try {
-      // Debug: Check if we have the token
-      const token = process.env.POSTMARK_SERVER_TOKEN
-      if (!token) {
-        return res.status(500).json({
-          success: false,
-          error: 'POSTMARK_SERVER_TOKEN environment variable not set'
+      // Fetch data from multiple Postmark endpoints for comprehensive stats
+      const baseParams = `?fromdate=${fromDateStr}&todate=${toDateStr}`
+      
+      const [
+        sentStats,
+        bounceStats,
+        spamStats,
+        openStats,
+        clickStats,
+        suppressions
+      ] = await Promise.all([
+        makePostmarkRequest(`/stats/outbound/sends${baseParams}`),
+        makePostmarkRequest(`/stats/outbound/bounces${baseParams}`),
+        makePostmarkRequest(`/stats/outbound/spam${baseParams}`),
+        makePostmarkRequest(`/stats/outbound/opens${baseParams}`),
+        makePostmarkRequest(`/stats/outbound/clicks${baseParams}`),
+        makePostmarkRequest('/suppressions/dump')
+      ])
+
+      console.log('API responses received:', {
+        sent: sentStats,
+        bounces: bounceStats,
+        spam: spamStats,
+        opens: openStats,
+        clicks: clickStats,
+        suppressions: suppressions?.suppressions?.length || 0
+      })
+
+      // Process daily data by combining all sources
+      const dailyMap = new Map<string, any>()
+      
+      // Initialize daily data from sent stats
+      if (sentStats.Days) {
+        sentStats.Days.forEach((day: any) => {
+          dailyMap.set(day.Date, {
+            date: day.Date,
+            sent: day.Sent || 0,
+            delivered: 0,
+            opened: 0,
+            clicked: 0,
+            bounced: 0,
+            spam: 0,
+            unsubscribed: 0
+          })
         })
       }
 
-      // Get overall stats first
-      const overallStats = await postmark.getStatsWithRetry(fromDateStr, toDateStr)
-      
-      // For now, we'll just show overall stats as one "overall" tag
-      // In future, you can enhance this to fetch multiple tags
-      const tags = ['overall']
-      
-      // Process the data
-      let totalSent = 0
-      let totalDelivered = 0
-      let totalOpened = 0
-      let totalClicked = 0
-      let totalBounced = 0
-      let totalSpam = 0
-      let totalUnsubscribed = 0
+      // Add bounce data
+      if (bounceStats.Days) {
+        bounceStats.Days.forEach((day: any) => {
+          const existing = dailyMap.get(day.Date) || { 
+            date: day.Date, sent: 0, delivered: 0, opened: 0, clicked: 0, bounced: 0, spam: 0, unsubscribed: 0 
+          }
+          existing.bounced = (day.HardBounce || 0) + (day.SoftBounce || 0) + (day.Transient || 0) + (day.SMTPApiError || 0)
+          dailyMap.set(day.Date, existing)
+        })
+      }
 
-      // Calculate totals from daily data
-      overallStats.Days.forEach((day) => {
-        totalSent += day.Sent
-        totalDelivered += day.Delivered
-        totalOpened += day.Opened
-        totalClicked += day.Clicked
-        totalBounced += day.Bounced
-        totalSpam += day.SpamComplaints
-        totalUnsubscribed += day.Unsubscribed
+      // Add spam data
+      if (spamStats.Days) {
+        spamStats.Days.forEach((day: any) => {
+          const existing = dailyMap.get(day.Date) || { 
+            date: day.Date, sent: 0, delivered: 0, opened: 0, clicked: 0, bounced: 0, spam: 0, unsubscribed: 0 
+          }
+          existing.spam = day.SpamComplaint || 0
+          dailyMap.set(day.Date, existing)
+        })
+      }
+
+      // Add open data
+      if (openStats.Days) {
+        openStats.Days.forEach((day: any) => {
+          const existing = dailyMap.get(day.Date) || { 
+            date: day.Date, sent: 0, delivered: 0, opened: 0, clicked: 0, bounced: 0, spam: 0, unsubscribed: 0 
+          }
+          existing.opened = day.Opens || 0
+          dailyMap.set(day.Date, existing)
+        })
+      }
+
+      // Add click data
+      if (clickStats.Days) {
+        clickStats.Days.forEach((day: any) => {
+          const existing = dailyMap.get(day.Date) || { 
+            date: day.Date, sent: 0, delivered: 0, opened: 0, clicked: 0, bounced: 0, spam: 0, unsubscribed: 0 
+          }
+          existing.clicked = day.Clicks || 0
+          dailyMap.set(day.Date, existing)
+        })
+      }
+
+      // Calculate delivered and process unsubscribes from suppressions
+      let totalUnsubscribed = 0
+      if (suppressions?.Suppressions) {
+        // Count suppressions with reason 'ManualSuppression' as unsubscribes
+        suppressions.Suppressions.forEach((suppression: any) => {
+          if (suppression.SuppressionReason === 'ManualSuppression') {
+            totalUnsubscribed++
+            // For daily breakdown, we'd need the created date of the suppression
+            // Postmark doesn't provide this in the dump, so we'll add to the latest day
+            const sortedDays = Array.from(dailyMap.keys()).sort()
+            if (sortedDays.length > 0) {
+              const latestDay = dailyMap.get(sortedDays[sortedDays.length - 1])
+              if (latestDay) {
+                latestDay.unsubscribed = Math.floor(totalUnsubscribed / sortedDays.length)
+              }
+            }
+          }
+        })
+      }
+
+      // Calculate delivered = sent - bounced for each day
+      dailyMap.forEach((day) => {
+        day.delivered = Math.max(0, day.sent - day.bounced)
+      })
+
+      // Convert map to array and sort by date
+      const daily = Array.from(dailyMap.values()).sort((a, b) => 
+        new Date(a.date).getTime() - new Date(b.date).getTime()
+      )
+
+      // Calculate totals
+      const totals = daily.reduce((acc, day) => {
+        acc.sent += day.sent
+        acc.delivered += day.delivered
+        acc.opened += day.opened
+        acc.clicked += day.clicked
+        acc.bounced += day.bounced
+        acc.spam += day.spam
+        acc.unsubscribed += day.unsubscribed
+        return acc
+      }, {
+        sent: 0,
+        delivered: 0,
+        opened: 0,
+        clicked: 0,
+        bounced: 0,
+        spam: 0,
+        unsubscribed: totalUnsubscribed
       })
 
       // Create summary
       const summary = {
-        sent: totalSent,
-        delivered: totalDelivered,
-        opened: totalOpened,
-        clicked: totalClicked,
-        bounced: totalBounced,
-        spam: totalSpam,
-        unsubscribed: totalUnsubscribed,
-        openRate: calculateRate(totalOpened, totalDelivered),
-        clickRate: calculateRate(totalClicked, totalDelivered),
-        bounceRate: calculateRate(totalBounced, totalSent)
+        sent: totals.sent,
+        delivered: totals.delivered,
+        opened: totals.opened,
+        clicked: totals.clicked,
+        bounced: totals.bounced,
+        spam: totals.spam,
+        unsubscribed: totals.unsubscribed,
+        openRate: calculateRate(totals.opened, totals.delivered),
+        clickRate: calculateRate(totals.clicked, totals.delivered),
+        bounceRate: calculateRate(totals.bounced, totals.sent)
       }
 
-      // Create by tag data (just overall for now)
+      // Create by tag data (overall for now)
       const byTag = [{
         tag: 'overall',
-        sent: totalSent,
-        delivered: totalDelivered,
-        opened: totalOpened,
-        clicked: totalClicked,
-        bounced: totalBounced,
-        spam: totalSpam,
-        unsubscribed: totalUnsubscribed,
-        openRate: calculateRate(totalOpened, totalDelivered),
-        clickRate: calculateRate(totalClicked, totalDelivered),
-        bounceRate: calculateRate(totalBounced, totalSent)
+        ...summary
       }]
 
-      // Create daily data
-      const daily = overallStats.Days.map(day => ({
-        date: day.Date,
-        sent: day.Sent,
-        delivered: day.Delivered,
-        opened: day.Opened,
-        clicked: day.Clicked,
-        bounced: day.Bounced,
-        spam: day.SpamComplaints,
-        unsubscribed: day.Unsubscribed
-      }))
+      console.log('Final summary:', summary)
 
       res.status(200).json({
         success: true,
@@ -165,12 +276,10 @@ export default async function handler(
     } catch (error) {
       console.error('Failed to fetch data from Postmark:', error)
       
-      // Get detailed error message
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       console.error('Detailed error:', errorMessage)
       
-      // Check if it's a rate limit error
-      if (errorMessage.includes('Rate limit')) {
+      if (errorMessage.includes('Rate limit') || errorMessage.includes('429')) {
         return res.status(429).json({ 
           success: false, 
           error: errorMessage,
@@ -178,7 +287,6 @@ export default async function handler(
         })
       }
       
-      // Return the actual error message for debugging
       return res.status(500).json({ 
         success: false, 
         error: `Postmark API error: ${errorMessage}`
