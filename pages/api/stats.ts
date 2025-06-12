@@ -75,6 +75,15 @@ export default async function handler(
     const postmark = getPostmarkClient()
     
     try {
+      // Debug: Check if we have the token
+      const token = process.env.POSTMARK_SERVER_TOKEN
+      if (!token) {
+        return res.status(500).json({
+          success: false,
+          error: 'POSTMARK_SERVER_TOKEN environment variable not set'
+        })
+      }
+
       // Get overall stats first
       const overallStats = await postmark.getStatsWithRetry(fromDateStr, toDateStr)
       
@@ -156,18 +165,23 @@ export default async function handler(
     } catch (error) {
       console.error('Failed to fetch data from Postmark:', error)
       
+      // Get detailed error message
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      console.error('Detailed error:', errorMessage)
+      
       // Check if it's a rate limit error
-      if (error instanceof Error && error.message.includes('Rate limit')) {
+      if (errorMessage.includes('Rate limit')) {
         return res.status(429).json({ 
           success: false, 
-          error: error.message,
+          error: errorMessage,
           rateLimited: true
         })
       }
       
+      // Return the actual error message for debugging
       return res.status(500).json({ 
         success: false, 
-        error: 'Failed to fetch data from Postmark API' 
+        error: `Postmark API error: ${errorMessage}`
       })
     }
 
