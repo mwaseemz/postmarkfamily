@@ -96,27 +96,81 @@ export default async function handler(
     console.log(`Fetching Postmark stats from ${fromDateStr} to ${toDateStr}`)
 
     try {
-      // Use the overview endpoint that matches Postmark dashboard exactly
-      const [overviewData, sendsData] = await Promise.all([
+      // HYBRID APPROACH:
+      // 1. Use overview endpoint for accurate summary totals (matches Postmark dashboard)
+      // 2. Use individual endpoints for proper daily breakdown data for charts
+      
+      const [overviewData, sendsData, opensData, clicksData, bounceData] = await Promise.all([
         makePostmarkRequest(`/stats/outbound${baseParams}`),
-        makePostmarkRequest(`/stats/outbound/sends${baseParams}`)
+        makePostmarkRequest(`/stats/outbound/sends${baseParams}`),
+        makePostmarkRequest(`/stats/outbound/opens${baseParams}`).catch(() => ({ Days: [] })),
+        makePostmarkRequest(`/stats/outbound/clicks${baseParams}`).catch(() => ({ Days: [] })),
+        makePostmarkRequest(`/stats/outbound/bounces${baseParams}`).catch(() => ({ Days: [] }))
       ])
 
       console.log('Overview data:', JSON.stringify(overviewData, null, 2))
 
-      // Extract daily data from sends endpoint for charts
-      const dailyData = sendsData.Days?.map((day: any) => ({
-        date: day.Date,
-        sent: day.Sent || 0,
-        delivered: Math.max(0, (day.Sent || 0) - (overviewData.Bounced || 0) / (sendsData.Days?.length || 1)),
-        opened: 0, // Overview doesn't provide daily breakdown
-        clicked: 0,
-        bounced: Math.round((overviewData.Bounced || 0) / (sendsData.Days?.length || 1)),
-        spam: Math.round((overviewData.SpamComplaints || 0) / (sendsData.Days?.length || 1)),
-        unsubscribed: 0
-      })) || []
+      // Create daily data map for charts using individual endpoint data
+      const dailyMap = new Map<string, any>()
+      
+      // Initialize with sent data
+      if (sendsData.Days) {
+        sendsData.Days.forEach((day: any) => {
+          dailyMap.set(day.Date, {
+            date: day.Date,
+            sent: day.Sent || 0,
+            delivered: 0, // Will calculate below
+            opened: 0,
+            clicked: 0,
+            bounced: 0,
+            spam: 0,
+            unsubscribed: 0
+          })
+        })
+      }
 
-      // Calculate delivered emails (sent - bounced)
+      // Add opens data (use unique opens for consistency)
+      if (opensData.Days) {
+        opensData.Days.forEach((day: any) => {
+          const existing = dailyMap.get(day.Date)
+          if (existing) {
+            existing.opened = day.Unique || day.Opens || 0
+          }
+        })
+      }
+
+      // Add clicks data (use unique clicks for consistency)
+      if (clicksData.Days) {
+        clicksData.Days.forEach((day: any) => {
+          const existing = dailyMap.get(day.Date)
+          if (existing) {
+            existing.clicked = day.Unique || day.Clicks || 0
+          }
+        })
+      }
+
+      // Add bounce data (use actual bounces, not SMTP errors)
+      if (bounceData.Days) {
+        bounceData.Days.forEach((day: any) => {
+          const existing = dailyMap.get(day.Date)
+          if (existing) {
+            // Only count hard bounces and soft bounces, not SMTP API errors
+            existing.bounced = (day.HardBounce || 0) + (day.SoftBounce || 0) + (day.Transient || 0)
+          }
+        })
+      }
+
+      // Calculate delivered for each day (sent - bounced)
+      dailyMap.forEach((day) => {
+        day.delivered = Math.max(0, day.sent - day.bounced)
+      })
+
+      // Convert to array and sort by date
+      const dailyData = Array.from(dailyMap.values()).sort((a, b) => 
+        new Date(a.date).getTime() - new Date(b.date).getTime()
+      )
+
+      // Calculate delivered emails (sent - bounced) from overview
       const delivered = Math.max(0, (overviewData.Sent || 0) - (overviewData.Bounced || 0))
 
       // Create summary using overview data (matches Postmark dashboard exactly)
@@ -134,6 +188,7 @@ export default async function handler(
       }
 
       console.log('Calculated summary:', JSON.stringify(summary, null, 2))
+      console.log('Daily data sample:', JSON.stringify(dailyData.slice(0, 3), null, 2))
 
       // Create empty byTag data (would require tag-specific API calls)
       const byTag: any[] = []
