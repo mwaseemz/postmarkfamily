@@ -134,8 +134,9 @@ class PostmarkAPI {
   async getStats(fromDate: string, toDate: string, tag?: string): Promise<PostmarkStatsResponse> {
     await this.checkRateLimit()
 
-    // Use the correct Postmark stats endpoint - "Get outbound overview"
-    let endpoint = `/stats/outbound/overview?fromdate=${fromDate}&todate=${toDate}`
+    // Use the correct Postmark stats endpoint - "Get outbound overview" 
+    // According to Postmark API docs, the endpoint is /stats/outbound (not /stats/outbound/overview)
+    let endpoint = `/stats/outbound?fromdate=${fromDate}&todate=${toDate}`
     if (tag) {
       endpoint += `&tag=${encodeURIComponent(tag)}`
     }
@@ -172,12 +173,12 @@ class PostmarkAPI {
         const singleDay = {
           Date: toDate,
           Sent: rawData.Sent || 0,
-          Delivered: rawData.Delivered || rawData.TotalDelivered || 0,
-          Opened: rawData.Opened || rawData.TotalOpened || 0,
-          Clicked: rawData.Clicked || rawData.TotalClicked || 0,
-          Bounced: rawData.Bounced || rawData.TotalBounced || 0,
-          SpamComplaints: rawData.SpamComplaints || rawData.TotalSpamComplaints || 0,
-          Unsubscribed: rawData.Unsubscribed || rawData.TotalUnsubscribed || 0
+          Delivered: rawData.Delivered || (rawData.Sent || 0) - (rawData.Bounced || 0),
+          Opened: rawData.Opens || rawData.UniqueOpens || 0,
+          Clicked: rawData.TotalClicks || rawData.UniqueLinksClicked || 0,
+          Bounced: rawData.Bounced || 0,
+          SpamComplaints: rawData.SpamComplaints || 0,
+          Unsubscribed: 0 // Not provided in overview endpoint
         }
         
         return { Days: [singleDay] }

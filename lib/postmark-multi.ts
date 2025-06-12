@@ -55,11 +55,11 @@ export class PostmarkMultiAPI {
       // Combine all the data
       const combinedData = {
         Sent: sentStats.Sent || 0,
-        Delivered: (sentStats.Sent || 0) - (bounceStats.Bounces || 0),
+        Delivered: (sentStats.Sent || 0) - (bounceStats.HardBounce || 0) - (bounceStats.SoftBounce || 0) - (bounceStats.Transient || 0),
         Opened: openStats.Opens || 0,
         Clicked: clickStats.Clicks || 0,
-        Bounced: bounceStats.Bounces || 0,
-        SpamComplaints: spamStats.SpamComplaints || 0,
+        Bounced: (bounceStats.HardBounce || 0) + (bounceStats.SoftBounce || 0) + (bounceStats.Transient || 0),
+        SpamComplaints: spamStats.SpamComplaint || 0,
         Unsubscribed: 0 // Would need subscription API
       }
 
