@@ -134,7 +134,8 @@ class PostmarkAPI {
   async getStats(fromDate: string, toDate: string, tag?: string): Promise<PostmarkStatsResponse> {
     await this.checkRateLimit()
 
-    let endpoint = `/stats/outbound?fromdate=${fromDate}&todate=${toDate}`
+    // Use the correct Postmark stats endpoint - "Get outbound overview"
+    let endpoint = `/stats/outbound/overview?fromdate=${fromDate}&todate=${toDate}`
     if (tag) {
       endpoint += `&tag=${encodeURIComponent(tag)}`
     }
@@ -165,18 +166,18 @@ class PostmarkAPI {
     } catch (parseError) {
       console.error('Schema parse error:', parseError)
       
-      // If the response doesn't have Days, create a compatible structure
+      // Handle different Postmark response formats
       if (!rawData.Days) {
-        // Create a single day entry from the aggregate data
+        // Postmark overview endpoint returns aggregate data, convert to daily format
         const singleDay = {
           Date: toDate,
           Sent: rawData.Sent || 0,
-          Delivered: rawData.Delivered || 0,
-          Opened: rawData.Opened || 0,
-          Clicked: rawData.Clicked || 0,
-          Bounced: rawData.Bounced || 0,
-          SpamComplaints: rawData.SpamComplaints || 0,
-          Unsubscribed: rawData.Unsubscribed || 0
+          Delivered: rawData.Delivered || rawData.TotalDelivered || 0,
+          Opened: rawData.Opened || rawData.TotalOpened || 0,
+          Clicked: rawData.Clicked || rawData.TotalClicked || 0,
+          Bounced: rawData.Bounced || rawData.TotalBounced || 0,
+          SpamComplaints: rawData.SpamComplaints || rawData.TotalSpamComplaints || 0,
+          Unsubscribed: rawData.Unsubscribed || rawData.TotalUnsubscribed || 0
         }
         
         return { Days: [singleDay] }
