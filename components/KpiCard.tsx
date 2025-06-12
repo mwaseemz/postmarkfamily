@@ -10,7 +10,7 @@ interface KpiCardProps {
     value: number
     isPositive: boolean
   }
-  format?: 'number' | 'percentage'
+  format?: 'number' | 'percentage' | 'currency'
   className?: string
 }
 
@@ -26,14 +26,15 @@ export default function KpiCard({
   const formatValue = (val: number | string) => {
     if (typeof val === 'string') return val
     
+    if (format === 'currency') {
+      return `$${val.toLocaleString()}`
+    }
     if (format === 'percentage') {
       return `${val}%`
     }
-    
     if (format === 'number') {
       return val.toLocaleString()
     }
-    
     return val.toString()
   }
 
