@@ -180,7 +180,8 @@ export default async function handler(
           const existing = dailyMap.get(day.Date) || { 
             date: day.Date, sent: 0, delivered: 0, opened: 0, clicked: 0, bounced: 0, spam: 0, unsubscribed: 0 
           }
-          existing.opened = day.Opens || 0
+          // Use unique opens for better rate calculation, fall back to total opens if unique not available
+          existing.opened = day.Unique || day.Opens || 0
           dailyMap.set(day.Date, existing)
         })
       }
@@ -191,7 +192,8 @@ export default async function handler(
           const existing = dailyMap.get(day.Date) || { 
             date: day.Date, sent: 0, delivered: 0, opened: 0, clicked: 0, bounced: 0, spam: 0, unsubscribed: 0 
           }
-          existing.clicked = day.Clicks || 0
+          // Use unique clicks for better rate calculation, fall back to total clicks if unique not available
+          existing.clicked = day.Unique || day.Clicks || 0
           dailyMap.set(day.Date, existing)
         })
       }

@@ -299,6 +299,7 @@ export default function Dashboard() {
                   value={data.summary.unsubscribed}
                   icon={TrendingUp}
                   format="number"
+                  subtitle="Note: Requires suppressions API access"
                 />
               </div>
 
