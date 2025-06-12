@@ -87,7 +87,8 @@ export default function Dashboard() {
         setData(result.data)
         toast.success('Data refreshed successfully')
       } else {
-        if (result.rateLimited) {
+        // Check if it's a rate limiting error based on error message
+        if (result.error?.includes('Rate limit') || result.error?.includes('429')) {
           toast.error(`Rate limited: ${result.error}`, {
             duration: 5000,
             icon: '⏱️'
@@ -247,7 +248,7 @@ export default function Dashboard() {
                   Showing data from {format(new Date(dateRange.from), 'MMM d, yyyy')} to {format(new Date(dateRange.to), 'MMM d, yyyy')}
                 </div>
                 <div className="text-sm text-gray-500 dark:text-gray-400">
-                  Last updated: {formatLastUpdated(data.lastUpdated)}
+                  Time range: {data.timeRange}
                 </div>
               </div>
 
