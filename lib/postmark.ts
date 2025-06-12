@@ -132,12 +132,58 @@ class PostmarkAPI {
   }
 
   async getStats(fromDate: string, toDate: string, tag?: string): Promise<PostmarkStatsResponse> {
+    await this.checkRateLimit()
+
     let endpoint = `/stats/outbound?fromdate=${fromDate}&todate=${toDate}`
     if (tag) {
       endpoint += `&tag=${encodeURIComponent(tag)}`
     }
 
-    return this.makeRequest(endpoint, PostmarkStatsResponseSchema)
+    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+      headers: {
+        'Accept': 'application/json',
+        'X-Postmark-Server-Token': this.serverToken
+      }
+    })
+
+    this.updateRateLimitState()
+
+    if (!response.ok) {
+      if (response.status === 429) {
+        await this.handleRateLimit()
+        throw new Error(`Rate limited: ${response.statusText}`)
+      }
+      throw new Error(`Postmark API error: ${response.status} ${response.statusText}`)
+    }
+
+    const rawData = await response.json()
+    console.log('Raw Postmark response:', JSON.stringify(rawData, null, 2))
+
+    // Try to parse with schema, but handle the case where it might be different
+    try {
+      return PostmarkStatsResponseSchema.parse(rawData)
+    } catch (parseError) {
+      console.error('Schema parse error:', parseError)
+      
+      // If the response doesn't have Days, create a compatible structure
+      if (!rawData.Days) {
+        // Create a single day entry from the aggregate data
+        const singleDay = {
+          Date: toDate,
+          Sent: rawData.Sent || 0,
+          Delivered: rawData.Delivered || 0,
+          Opened: rawData.Opened || 0,
+          Clicked: rawData.Clicked || 0,
+          Bounced: rawData.Bounced || 0,
+          SpamComplaints: rawData.SpamComplaints || 0,
+          Unsubscribed: rawData.Unsubscribed || 0
+        }
+        
+        return { Days: [singleDay] }
+      }
+      
+      throw parseError
+    }
   }
 
   async getStatsWithRetry(fromDate: string, toDate: string, tag?: string, retries = 0): Promise<PostmarkStatsResponse> {
