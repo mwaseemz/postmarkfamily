@@ -8,7 +8,8 @@ import {
   Title,
   Tooltip,
   Legend,
-  ChartOptions
+  ChartOptions,
+  TooltipItem
 } from 'chart.js'
 
 // Register ChartJS components
@@ -55,7 +56,7 @@ export default function LineChart({ data, xAxis, yAxis, format = 'number' }: Lin
       },
       tooltip: {
         callbacks: {
-          label: function(context) {
+          label: function(context: TooltipItem<'line'>) {
             const value = context.parsed.y
             switch (format) {
               case 'currency':
@@ -78,14 +79,15 @@ export default function LineChart({ data, xAxis, yAxis, format = 'number' }: Lin
       y: {
         beginAtZero: true,
         ticks: {
-          callback: function(value) {
+          callback: function(tickValue: number | string) {
+            const value = typeof tickValue === 'string' ? parseFloat(tickValue) : tickValue
             switch (format) {
               case 'currency':
-                return `$${Number(value).toLocaleString()}`
+                return `$${value.toLocaleString()}`
               case 'percentage':
                 return `${value}%`
               default:
-                return Number(value).toLocaleString()
+                return value.toLocaleString()
             }
           }
         }
