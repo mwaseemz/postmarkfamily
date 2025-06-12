@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: 'standalone'
+  // Let Netlify plugin handle the output configuration
 }
 
 module.exports = nextConfig 
