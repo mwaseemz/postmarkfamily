@@ -12,13 +12,17 @@ import {
   Calendar,
   Moon,
   Sun,
-  TrendingUp
+  TrendingUp,
+  DollarSign,
+  ShoppingCart,
+  Wallet
 } from 'lucide-react'
 import { format, subDays } from 'date-fns'
 import KpiCard from '@/components/KpiCard'
 import StatsChart from '@/components/StatsChart'
 import StatsTable from '@/components/StatsTable'
 import { StatsResponse } from '@/pages/api/stats'
+import LineChart from '@/components/LineChart'
 
 const TIME_RANGES = [
   { label: '7 days', days: 7 },
@@ -26,8 +30,28 @@ const TIME_RANGES = [
   { label: '90 days', days: 90 }
 ]
 
+interface ThriveCartData {
+  summary: {
+    totalSales: number
+    totalOrders: number
+    averageOrderValue: number
+    refunds: number
+    netRevenue: number
+    conversionRate: number
+  }
+  daily: Array<{
+    date: string
+    sales: number
+    orders: number
+    refunds: number
+    netRevenue: number
+  }>
+  timeRange: string
+}
+
 export default function Dashboard() {
   const [data, setData] = useState<StatsResponse['data'] | null>(null)
+  const [thriveCartData, setThriveCartData] = useState<ThriveCartData | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [darkMode, setDarkMode] = useState(false)
@@ -106,10 +130,39 @@ export default function Dashboard() {
     }
   }
 
-  // Force refresh data
+  // Fetch ThriveCart data
+  const fetchThriveCartData = async (refresh = false) => {
+    try {
+      const params = new URLSearchParams()
+      if (selectedRange > 0) {
+        params.append('days', selectedRange.toString())
+      } else {
+        params.append('from', dateRange.from)
+        params.append('to', dateRange.to)
+      }
+
+      const response = await fetch(`/api/thrivecart?${params.toString()}`)
+      const result = await response.json()
+
+      if (result.success && result.data) {
+        setThriveCartData(result.data)
+        if (refresh) {
+          toast.success('ThriveCart data refreshed successfully')
+        }
+      } else {
+        toast.error(`Failed to fetch ThriveCart data: ${result.error}`)
+      }
+    } catch (error) {
+      toast.error('Failed to fetch ThriveCart data')
+      console.error('ThriveCart fetch error:', error)
+    }
+  }
+
+  // Force refresh all data
   const handleRefresh = async () => {
     setRefreshing(true)
-    await fetchData(true)
+    await Promise.all([fetchData(true), fetchThriveCartData(true)])
+    setRefreshing(false)
   }
 
   // Handle preset time range change
@@ -134,7 +187,7 @@ export default function Dashboard() {
 
   // Initial load and range changes
   useEffect(() => {
-    fetchData()
+    Promise.all([fetchData(), fetchThriveCartData()])
   }, [selectedRange, dateRange])
 
   const formatLastUpdated = (dateStr: string) => {
@@ -337,6 +390,76 @@ export default function Dashboard() {
                   Performance by Tag
                 </h3>
                 <StatsTable data={data.byTag} />
+              </div>
+
+              {/* ThriveCart Section */}
+              <div className="mt-12">
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
+                  ThriveCart Analytics
+                </h2>
+
+                {thriveCartData ? (
+                  <>
+                    {/* ThriveCart KPI Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                      <KpiCard
+                        title="Total Sales"
+                        value={thriveCartData.summary.totalSales}
+                        icon={DollarSign}
+                        format="currency"
+                      />
+                      <KpiCard
+                        title="Total Orders"
+                        value={thriveCartData.summary.totalOrders}
+                        icon={ShoppingCart}
+                        format="number"
+                      />
+                      <KpiCard
+                        title="Average Order Value"
+                        value={thriveCartData.summary.averageOrderValue}
+                        icon={TrendingUp}
+                        format="currency"
+                      />
+                      <KpiCard
+                        title="Net Revenue"
+                        value={thriveCartData.summary.netRevenue}
+                        icon={Wallet}
+                        format="currency"
+                        subtitle={`${thriveCartData.summary.refunds} refunds`}
+                      />
+                    </div>
+
+                    {/* ThriveCart Charts */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                        <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">
+                          Daily Sales
+                        </h3>
+                        <LineChart
+                          data={thriveCartData.daily}
+                          xAxis="date"
+                          yAxis="sales"
+                          format="currency"
+                        />
+                      </div>
+                      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                        <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">
+                          Daily Orders
+                        </h3>
+                        <LineChart
+                          data={thriveCartData.daily}
+                          xAxis="date"
+                          yAxis="orders"
+                          format="number"
+                        />
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-center text-gray-500 dark:text-gray-400">
+                    No ThriveCart data available
+                  </div>
+                )}
               </div>
             </div>
           ) : (
