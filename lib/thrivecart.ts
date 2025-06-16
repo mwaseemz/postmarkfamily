@@ -1,4 +1,5 @@
 import Papa from 'papaparse';
+import { format, subDays, isAfter, isBefore, parseISO } from 'date-fns';
 
 export interface ThriveCartTransaction {
   event: 'purchase' | 'upsellaccept' | 'abandon' | 'refund';
@@ -21,6 +22,8 @@ export interface ThriveCartStats {
   dailyStats: DailyStats[];
   productStats: ProductStats[];
   recentTransactions: ThriveCartTransaction[];
+  timeRange: string;
+  lastUpdated: string;
 }
 
 export interface DailyStats {
@@ -38,14 +41,16 @@ export interface ProductStats {
   averagePrice: number;
 }
 
+export interface DateRange {
+  from: string;
+  to: string;
+}
+
 const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSTi7NRqAnk8OxsPdaUURzmpO63lufSWoufd5PNfUBE18xLHwdKqSDZU9l_EIgBmN5CSv3r0U_YAlk6/pub?gid=0&single=true&output=csv';
 
 export class ThriveCartService {
   private static instance: ThriveCartService;
-  private cache: { data: ThriveCartStats | null; timestamp: number } = {
-    data: null,
-    timestamp: 0
-  };
+  private cache: Map<string, { data: ThriveCartStats; timestamp: number }> = new Map();
   private readonly CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
   static getInstance(): ThriveCartService {
@@ -55,11 +60,15 @@ export class ThriveCartService {
     return ThriveCartService.instance;
   }
 
-  async fetchData(forceRefresh = false): Promise<ThriveCartStats> {
+  async fetchData(forceRefresh = false, dateRange?: DateRange): Promise<ThriveCartStats> {
     const now = Date.now();
     
-    if (!forceRefresh && this.cache.data && (now - this.cache.timestamp) < this.CACHE_DURATION) {
-      return this.cache.data;
+    // Create cache key based on date range
+    const cacheKey = dateRange ? `${dateRange.from}-${dateRange.to}` : 'all';
+    const cached = this.cache.get(cacheKey);
+    
+    if (!forceRefresh && cached && (now - cached.timestamp) < this.CACHE_DURATION) {
+      return cached.data;
     }
 
     try {
@@ -78,25 +87,57 @@ export class ThriveCartService {
         console.warn('CSV parsing warnings:', parsed.errors);
       }
 
-      const transactions = this.parseTransactions(parsed.data);
-      const stats = this.calculateStats(transactions);
+      const allTransactions = this.parseTransactions(parsed.data);
+      const filteredTransactions = this.filterTransactionsByDate(allTransactions, dateRange);
+      const stats = this.calculateStats(filteredTransactions, dateRange);
       
-      this.cache = {
+      this.cache.set(cacheKey, {
         data: stats,
         timestamp: now
-      };
+      });
 
       return stats;
     } catch (error) {
       console.error('Error fetching ThriveCart data:', error);
       
       // Return cached data if available, otherwise return empty stats
-      if (this.cache.data) {
-        return this.cache.data;
+      if (cached) {
+        return cached.data;
       }
       
-      return this.getEmptyStats();
+      return this.getEmptyStats(dateRange);
     }
+  }
+
+  private filterTransactionsByDate(transactions: ThriveCartTransaction[], dateRange?: DateRange): ThriveCartTransaction[] {
+    if (!dateRange) {
+      return transactions;
+    }
+
+    const fromDate = parseISO(dateRange.from);
+    const toDate = parseISO(dateRange.to);
+
+    return transactions.filter(transaction => {
+      if (!transaction.date) return false;
+      
+      try {
+        // Handle different date formats
+        let transactionDate: Date;
+        if (transaction.date.includes(' ')) {
+          // Format: "2025-06-13 14:46:08"
+          transactionDate = parseISO(transaction.date.split(' ')[0]);
+        } else {
+          // Format: "2025-06-13"
+          transactionDate = parseISO(transaction.date);
+        }
+
+        return (isAfter(transactionDate, fromDate) || transactionDate.getTime() === fromDate.getTime()) &&
+               (isBefore(transactionDate, toDate) || transactionDate.getTime() === toDate.getTime());
+      } catch (error) {
+        console.warn('Error parsing transaction date:', transaction.date, error);
+        return false;
+      }
+    });
   }
 
   private parseTransactions(data: string[][]): ThriveCartTransaction[] {
@@ -154,7 +195,7 @@ export class ThriveCartService {
     return isNaN(parsed) ? 0 : parsed;
   }
 
-  private calculateStats(transactions: ThriveCartTransaction[]): ThriveCartStats {
+  private calculateStats(transactions: ThriveCartTransaction[], dateRange?: DateRange): ThriveCartStats {
     const purchases = transactions.filter(t => t.event === 'purchase');
     const upsells = transactions.filter(t => t.event === 'upsellaccept');
     const abandoned = transactions.filter(t => t.event === 'abandon');
@@ -180,6 +221,12 @@ export class ThriveCartService {
       ? totalRevenue / totalTransactions 
       : 0;
 
+    // Generate time range string
+    let timeRange = 'All time';
+    if (dateRange) {
+      timeRange = `${format(parseISO(dateRange.from), 'MMM d, yyyy')} to ${format(parseISO(dateRange.to), 'MMM d, yyyy')}`;
+    }
+
     return {
       totalRevenue,
       totalTransactions,
@@ -193,7 +240,9 @@ export class ThriveCartService {
       productStats: this.calculateProductStats(transactions),
       recentTransactions: transactions
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        .slice(0, 10)
+        .slice(0, 10),
+      timeRange,
+      lastUpdated: new Date().toISOString()
     };
   }
 
@@ -260,7 +309,12 @@ export class ThriveCartService {
       .sort((a, b) => b.revenue - a.revenue);
   }
 
-  private getEmptyStats(): ThriveCartStats {
+  private getEmptyStats(dateRange?: DateRange): ThriveCartStats {
+    let timeRange = 'All time';
+    if (dateRange) {
+      timeRange = `${format(parseISO(dateRange.from), 'MMM d, yyyy')} to ${format(parseISO(dateRange.to), 'MMM d, yyyy')}`;
+    }
+
     return {
       totalRevenue: 0,
       totalTransactions: 0,
@@ -272,7 +326,9 @@ export class ThriveCartService {
       averageOrderValue: 0,
       dailyStats: [],
       productStats: [],
-      recentTransactions: []
+      recentTransactions: [],
+      timeRange,
+      lastUpdated: new Date().toISOString()
     };
   }
 } 
