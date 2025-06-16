@@ -216,6 +216,14 @@ export default function Dashboard() {
                 <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
                   Postmark Analytics
                 </h1>
+                <div className="ml-8 flex items-center space-x-4">
+                  <a
+                    href="/thrivecart"
+                    className="text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+                  >
+                    ThriveCart Dashboard
+                  </a>
+                </div>
               </div>
               
               <div className="flex items-center space-x-4">
