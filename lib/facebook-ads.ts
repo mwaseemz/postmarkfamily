@@ -43,6 +43,11 @@ export interface FacebookAdsStats {
   campaignStats: FacebookCampaignData[];
   timeRange: string;
   lastUpdated: string;
+  debug?: {
+    adAccountsFound: number;
+    insightsDataPoints: number;
+    apiErrors?: string[];
+  };
 }
 
 export interface DateRange {
@@ -84,20 +89,36 @@ export class FacebookAdsService {
       return cached.data;
     }
 
+    const debug: { adAccountsFound: number; insightsDataPoints: number; apiErrors?: string[] } = {
+      adAccountsFound: 0,
+      insightsDataPoints: 0,
+      apiErrors: []
+    };
+
     try {
+      console.log('🔍 Fetching Facebook Ads data...');
+      
       // Get user's ad accounts
       const adAccounts = await this.getAdAccounts();
+      debug.adAccountsFound = adAccounts.length;
+      
+      console.log(`📊 Found ${adAccounts.length} ad accounts`);
       
       if (adAccounts.length === 0) {
-        throw new Error('No ad accounts found');
+        throw new Error('No ad accounts found for this user. Make sure the access token is for a user with ad account access.');
       }
 
       // Use the first ad account for now
       const adAccountId = adAccounts[0].id;
+      console.log(`🎯 Using ad account: ${adAccountId}`);
       
       // Fetch insights data
       const insights = await this.getAdAccountInsights(adAccountId, dateRange);
-      const stats = this.calculateStats(insights, dateRange);
+      debug.insightsDataPoints = insights.length;
+      
+      console.log(`📈 Found ${insights.length} data points`);
+      
+      const stats = this.calculateStats(insights, dateRange, debug);
       
       this.cache.set(cacheKey, {
         data: stats,
@@ -106,26 +127,38 @@ export class FacebookAdsService {
 
       return stats;
     } catch (error) {
-      console.error('Error fetching Facebook Ads data:', error);
+      console.error('❌ Error fetching Facebook Ads data:', error);
+      debug.apiErrors?.push(error instanceof Error ? error.message : String(error));
       
       // Return cached data if available, otherwise return empty stats
       if (cached) {
+        console.log('🔄 Returning cached data due to error');
         return cached.data;
       }
       
-      return this.getEmptyStats(dateRange);
+      return this.getEmptyStats(dateRange, debug);
     }
   }
 
   private async getAdAccounts(): Promise<any[]> {
     const url = `${this.baseUrl}/me/adaccounts?access_token=${this.accessToken}&fields=id,name,account_status`;
     
+    console.log('🔗 Fetching ad accounts from:', url.replace(this.accessToken, '[TOKEN]'));
+    
     const response = await fetch(url);
     if (!response.ok) {
-      throw new Error(`Failed to fetch ad accounts: ${response.statusText}`);
+      const errorText = await response.text();
+      console.error('❌ Ad accounts API error:', response.status, errorText);
+      throw new Error(`Failed to fetch ad accounts: ${response.status} - ${errorText}`);
     }
     
     const data = await response.json();
+    console.log('📋 Ad accounts response:', JSON.stringify(data, null, 2));
+    
+    if (data.error) {
+      throw new Error(`Facebook API error: ${data.error.message}`);
+    }
+    
     return data.data || [];
   }
 
@@ -157,16 +190,26 @@ export class FacebookAdsService {
 
     const url = `${this.baseUrl}/${adAccountId}/insights?access_token=${this.accessToken}&fields=${fields}&time_increment=1&level=account${timeRange}`;
     
+    console.log('🔗 Fetching insights from:', url.replace(this.accessToken, '[TOKEN]'));
+    
     const response = await fetch(url);
     if (!response.ok) {
-      throw new Error(`Failed to fetch insights: ${response.statusText}`);
+      const errorText = await response.text();
+      console.error('❌ Insights API error:', response.status, errorText);
+      throw new Error(`Failed to fetch insights: ${response.status} - ${errorText}`);
     }
     
     const data = await response.json();
+    console.log('📊 Insights response:', JSON.stringify(data, null, 2));
+    
+    if (data.error) {
+      throw new Error(`Facebook API error: ${data.error.message}`);
+    }
+    
     return data.data || [];
   }
 
-  private calculateStats(insights: any[], dateRange?: DateRange): FacebookAdsStats {
+  private calculateStats(insights: any[], dateRange?: DateRange, debug?: any): FacebookAdsStats {
     let totalSpend = 0;
     let totalClicks = 0;
     let totalImpressions = 0;
@@ -231,6 +274,8 @@ export class FacebookAdsService {
       timeRange = `${format(parseISO(dateRange.from), 'MMM d, yyyy')} to ${format(parseISO(dateRange.to), 'MMM d, yyyy')}`;
     }
 
+    console.log(`💰 Calculated totals: $${totalSpend} spend, ${totalClicks} clicks, ${totalLeads} leads`);
+
     return {
       totalSpend,
       totalClicks,
@@ -245,7 +290,8 @@ export class FacebookAdsService {
       dailyStats: dailyStats.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
       campaignStats: [], // Would need separate API call for campaign-level data
       timeRange,
-      lastUpdated: new Date().toISOString()
+      lastUpdated: new Date().toISOString(),
+      debug
     };
   }
 
@@ -263,7 +309,7 @@ export class FacebookAdsService {
     return action ? parseFloat(action.value || '0') : 0;
   }
 
-  private getEmptyStats(dateRange?: DateRange): FacebookAdsStats {
+  private getEmptyStats(dateRange?: DateRange, debug?: any): FacebookAdsStats {
     let timeRange = 'Last 30 days';
     if (dateRange) {
       timeRange = `${format(parseISO(dateRange.from), 'MMM d, yyyy')} to ${format(parseISO(dateRange.to), 'MMM d, yyyy')}`;
@@ -283,7 +329,8 @@ export class FacebookAdsService {
       dailyStats: [],
       campaignStats: [],
       timeRange,
-      lastUpdated: new Date().toISOString()
+      lastUpdated: new Date().toISOString(),
+      debug
     };
   }
 } 
