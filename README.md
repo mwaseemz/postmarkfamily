@@ -20,6 +20,13 @@ A comprehensive analytics dashboard built with Next.js 14, TypeScript, and Tailw
 - **Visual analytics**: Interactive charts showing daily sales trends and patterns
 - **Real-time updates**: Auto-refresh functionality with manual refresh option
 
+### Facebook Ads Analytics
+- **Campaign performance**: Comprehensive metrics including spend, clicks, impressions, CTR
+- **Lead tracking**: Lead generation metrics with cost per lead calculations
+- **Purchase tracking**: Purchase events and conversion rates from Facebook campaigns
+- **ROAS calculation**: Return on ad spend analysis across all campaigns
+- **Visual analytics**: Interactive charts showing daily ad performance trends
+
 ## 🛠 Tech Stack
 
 - **Framework**: Next.js 14 (Pages Router)
