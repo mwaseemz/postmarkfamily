@@ -10,7 +10,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!accessToken) {
       return res.status(400).json({ 
         error: 'Facebook access token is required',
-        message: 'Please provide FACEBOOK_ACCESS_TOKEN in environment variables or x-facebook-token header'
+        message: 'Please provide FACEBOOK_ACCESS_TOKEN in environment variables or x-facebook-token header. See FACEBOOK_SETUP.md for detailed instructions.'
       });
     }
 
@@ -45,9 +45,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       res.status(200).json(stats);
     } catch (fbError) {
       console.error('Facebook API error:', fbError);
-      res.status(500).json({
+      
+      // Provide specific guidance for common errors
+      let errorMessage = fbError instanceof Error ? fbError.message : String(fbError);
+      let statusCode = 500;
+      
+      if (errorMessage.includes('access token could not be decrypted') || errorMessage.includes('code":190')) {
+        statusCode = 401;
+        errorMessage = 'Facebook access token is invalid or expired. Please generate a new token from https://developers.facebook.com/tools/explorer/ and update your environment variable.';
+      } else if (errorMessage.includes('No ad accounts found')) {
+        statusCode = 403;
+        errorMessage = 'No ad accounts found for this user. The token must belong to a user with access to Facebook ad accounts.';
+      }
+      
+      res.status(statusCode).json({
         error: 'Failed to fetch Facebook Ads data',
-        message: fbError instanceof Error ? fbError.message : String(fbError)
+        message: errorMessage,
+        setupGuide: 'See FACEBOOK_SETUP.md for detailed setup instructions'
       });
     }
   } catch (error) {

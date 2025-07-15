@@ -134,7 +134,7 @@ export default function UnifiedDashboard() {
       }
 
       // Facebook access token from environment or the provided token
-      const facebookToken = process.env.FACEBOOK_ACCESS_TOKEN || 'EAAi0V09Ebq0BPPg4ufX903P4c8WoZCPhUhTjllPvOZBVurz7qG9Ys0DGVpmZCd3nXzf8eQN8CzoQ4zVEZBCgbcZCu5WhcqzeBZBHlZAhDCisEyT2rLwHWE8ZCtq7DQWXRvDAcK56P15Rj0NHuGt62zoXCF77SpUMKgps7ZBJZA7eZCi0DZAjQUEpG2y0mWTxaM1zH5XXBgb7NMaCzM4NuH7XzCkZD';
+      const facebookToken = process.env.FACEBOOK_ACCESS_TOKEN;
 
       // Fetch all data sources in parallel
       const [postmarkResponse, thrivecartResponse, facebookResponse] = await Promise.allSettled([
@@ -145,7 +145,7 @@ export default function UnifiedDashboard() {
         fetch(`/api/facebook-ads?${params}`, {
           method: refresh ? 'POST' : 'GET',
           headers: {
-            'x-facebook-token': facebookToken
+            ...(facebookToken && { 'x-facebook-token': facebookToken })
           }
         })
       ]);
@@ -172,6 +172,11 @@ export default function UnifiedDashboard() {
       // Process Facebook data
       if (facebookResponse.status === 'fulfilled' && facebookResponse.value.ok) {
         newData.facebook = await facebookResponse.value.json();
+      } else if (facebookResponse.status === 'rejected') {
+        console.error('Facebook API error:', facebookResponse.reason);
+      } else if (facebookResponse.status === 'fulfilled' && !facebookResponse.value.ok) {
+        const errorData = await facebookResponse.value.json().catch(() => ({}));
+        console.error('Facebook API error:', facebookResponse.value.status, errorData);
       }
 
       setData(newData);
@@ -458,16 +463,45 @@ export default function UnifiedDashboard() {
             <div className="space-y-8">
               {/* Facebook Data Error/Warning */}
               {(!data.facebook || (data.facebook && (!data.facebook.dailyStats || data.facebook.dailyStats.length === 0))) && (
-                <div className="bg-yellow-100 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-400 p-4 rounded-lg mb-4 text-center">
-                  <p className="font-medium">Warning: No Facebook Ads data found.</p>
-                  <p className="text-sm mt-1">Check your Facebook access token, permissions, and ad account. If you believe this is an error, check your Netlify logs or try a different token.</p>
+                <div className="bg-yellow-100 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-400 p-4 rounded-lg mb-4">
+                  <div className="text-center">
+                    <p className="font-medium">⚠️ Facebook Ads data not available</p>
+                    <p className="text-sm mt-1 mb-3">The Facebook access token is invalid or expired. Please follow the setup guide to fix this.</p>
+                    
+                    <div className="flex flex-col sm:flex-row gap-2 justify-center">
+                      <a 
+                        href="https://developers.facebook.com/tools/explorer/" 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                      >
+                        Get New Token
+                      </a>
+                      <a 
+                        href="/FACEBOOK_SETUP.md" 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center px-3 py-2 text-sm bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                      >
+                        Setup Guide
+                      </a>
+                    </div>
+                  </div>
+                  
                   {data.facebook?.debug && (
-                    <div className="mt-3 text-xs bg-yellow-200 dark:bg-yellow-800 p-2 rounded">
-                      <p><strong>Debug Info:</strong></p>
-                      <p>Ad Accounts Found: {data.facebook.debug.adAccountsFound}</p>
-                      <p>Data Points: {data.facebook.debug.insightsDataPoints}</p>
+                    <div className="mt-4 text-xs bg-yellow-200 dark:bg-yellow-800 p-3 rounded">
+                      <p className="font-medium mb-2">Debug Information:</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <p>Ad Accounts Found: <span className="font-mono">{data.facebook.debug.adAccountsFound}</span></p>
+                        <p>Data Points: <span className="font-mono">{data.facebook.debug.insightsDataPoints}</span></p>
+                      </div>
                       {data.facebook.debug.apiErrors && data.facebook.debug.apiErrors.length > 0 && (
-                        <p>Errors: {data.facebook.debug.apiErrors.join(', ')}</p>
+                        <div className="mt-2">
+                          <p className="font-medium">Errors:</p>
+                          {data.facebook.debug.apiErrors.map((error, index) => (
+                            <p key={index} className="font-mono text-red-600 dark:text-red-400">{error}</p>
+                          ))}
+                        </div>
                       )}
                     </div>
                   )}
