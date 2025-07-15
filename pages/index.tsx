@@ -456,6 +456,13 @@ export default function UnifiedDashboard() {
             </div>
           ) : (
             <div className="space-y-8">
+              {/* Facebook Data Error/Warning */}
+              {(!data.facebook || (data.facebook && (!data.facebook.dailyStats || data.facebook.dailyStats.length === 0))) && (
+                <div className="bg-yellow-100 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-400 p-4 rounded-lg mb-4 text-center">
+                  <p className="font-medium">Warning: No Facebook Ads data found.</p>
+                  <p className="text-sm mt-1">Check your Facebook access token, permissions, and ad account. If you believe this is an error, check your Netlify logs or try a different token.</p>
+                </div>
+              )}
               {/* Summary KPIs */}
               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
                 <KpiCard

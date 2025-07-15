@@ -40,10 +40,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       };
     }
     // If no date parameters, fetch default data (last 30 days)
-    
-    const stats = await service.fetchData(forceRefresh, dateRange);
-    
-    res.status(200).json(stats);
+    try {
+      const stats = await service.fetchData(forceRefresh, dateRange);
+      res.status(200).json(stats);
+    } catch (fbError) {
+      console.error('Facebook API error:', fbError);
+      res.status(500).json({
+        error: 'Failed to fetch Facebook Ads data',
+        message: fbError instanceof Error ? fbError.message : String(fbError)
+      });
+    }
   } catch (error) {
     console.error('Error in Facebook Ads API:', error);
     res.status(500).json({ 
