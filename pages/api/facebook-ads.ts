@@ -7,6 +7,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Get Facebook access token from environment or request headers
     const accessToken = process.env.FACEBOOK_ACCESS_TOKEN || req.headers['x-facebook-token'] as string;
     
+    // Debug logging (remove in production)
+    console.log('🔍 Facebook API Debug:');
+    console.log('- Environment token exists:', !!process.env.FACEBOOK_ACCESS_TOKEN);
+    console.log('- Header token exists:', !!req.headers['x-facebook-token']);
+    console.log('- Token length:', accessToken ? accessToken.length : 0);
+    console.log('- Token prefix:', accessToken ? accessToken.substring(0, 10) + '...' : 'none');
+    
     if (!accessToken) {
       return res.status(400).json({ 
         error: 'Facebook access token is required',
